@@ -1,9 +1,51 @@
-
 import json, requests, sys, urllib.parse, re, time, threading, logging, html
 from pathlib import Path
 from datetime import datetime, timezone
 from bs4 import BeautifulSoup
 import telebot
+import http.server
+import socketserver
+from threading import Thread
+
+# ---------------- PORT BINDING ----------------
+PORT = 8080
+HEALTH_SERVER = None
+
+def start_health_server():
+    """Start a simple HTTP server on specified port for health checks"""
+    class HealthHandler(http.server.SimpleHTTPRequestHandler):
+        def do_GET(self):
+            if self.path == '/health':
+                self.send_response(200)
+                self.send_header('Content-type', 'application/json')
+                self.end_headers()
+                response = {
+                    "status": "healthy",
+                    "service": "shein_autobuyer",
+                    "timestamp": datetime.now().isoformat(),
+                    "monitor_running": MONITOR_RUNNING.is_set(),
+                    "watchlist_count": len(WATCHLIST)
+                }
+                self.wfile.write(json.dumps(response).encode())
+            elif self.path == '/':
+                self.send_response(200)
+                self.send_header('Content-type', 'text/html')
+                self.end_headers()
+                self.wfile.write(b'<h1>Shein AutoBuyer Running</h1><p>Use /health endpoint</p>')
+            else:
+                self.send_response(404)
+                self.end_headers()
+    
+    # Disable logging for the health server
+    import http.server as hs
+    hs.HTTPServer.allow_reuse_address = True
+    
+    try:
+        with socketserver.TCPServer(("", PORT), HealthHandler) as server:
+            logger.info(f"Health server started on port {PORT}")
+            server.serve_forever()
+    except Exception as e:
+        logger.error(f"Health server error: {e}")
 
 # ---------------- CONFIG ----------------
 TELEGRAM_BOT_TOKEN = "8229954158:AAGzZ5psj2K2osN2k5Na9pncnPE8u1ufiWU" #replace with your bot token 
@@ -364,7 +406,7 @@ def parse_address_from_address_book_html(html_text):
 
             mline2 = re.search(r'"?line2"?\s*[:=]\s*"?([^",\}]+)"?', obj_text)
             if mline2:
-                kv["line2"] = mline2.group(1).strip()
+                kv["line2"] = mline2.group(1).strip())
 
             if kv:
                 return kv
@@ -1518,17 +1560,20 @@ def parse_payment_success(html_text):
     
 
 def run_bot():
+    # Start health server in background thread
+    health_thread = Thread(target=start_health_server, daemon=True)
+    health_thread.start()
+    logger.info(f"Health server started on port {PORT}")
+    
     logger.info("Starting Telebot polling...")
     try:
         bot.infinity_polling()
     except Exception as e:
-      
         logger.exception("Telebot crashed: %s", e)
         try:
             tg_send(f"⚠ Telebot crashed: {e}")
         except:
             pass
-       
         raise
 
 if __name__ == "__main__":
